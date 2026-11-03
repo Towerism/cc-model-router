@@ -35,9 +35,6 @@ ANTHROPIC = "https://api.anthropic.com"
 ANTHROPIC_NETS = [ipaddress.ip_network(n) for n in ("160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48")]
 DEFAULT_CONFIG = "~/.config/cc-model-router/config.toml"
 HOP_BY_HOP = {"host", "content-length", "connection", "keep-alive", "transfer-encoding"}
-# The only request fields the open-weight route passes on, so fields Claude Code adds later stay out.
-OPEN_WEIGHT_FIELDS = ("model", "system", "messages", "tools", "tool_choice", "max_tokens", "stream",
-                      "stop_sequences", "temperature", "top_p")
 TOP_LEVEL_SAMPLING = ("temperature", "top_p", "top_k")  # the rest go to the server as extra body fields
 ERROR_TYPES = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error",
                404: "not_found_error", 413: "request_too_large", 429: "rate_limit_error"}
@@ -72,10 +69,6 @@ def allow_only(hosts):
     sys.addaudithook(hook)
 
 
-def _blocks(content):
-    return [{"type": "text", "text": content}] if isinstance(content, str) else list(content)
-
-
 def without_unsigned_thinking(body):
     """The body minus thinking blocks with no signature (the open-weight model's), or None if it has none.
 
@@ -94,42 +87,16 @@ def without_unsigned_thinking(body):
     return {**body, "messages": messages} if changed else None
 
 
-def fold_system_messages(messages):
-    """Turn system messages after the first turn into user turns and merge adjacent user turns.
-
-    Claude Code sends system-role messages mid-conversation, and chat templates reject them.
-    """
-    out, seen = [], False
-    for m in messages:
-        role = m["role"]
-        if role == "system" and seen:
-            role = "user"
-        elif role != "system":
-            seen = True
-        m = {**m, "role": role}
-        if out and role == "user" and out[-1]["role"] == "user":
-            out[-1] = {**out[-1], "content": _blocks(out[-1]["content"]) + _blocks(m["content"])}
-        else:
-            out.append(m)
-    return out
-
-
 def open_weight_request(body, model):
-    """LiteLLM arguments for an open-weight model: the request edits ccx's shim made that LiteLLM doesn't."""
-    req = {k: body[k] for k in OPEN_WEIGHT_FIELDS if k in body}
+    """LiteLLM arguments for an open-weight model: Claude Code's body minus the billing-header system block,
+    plus the model's settings.
+
+    The billing header differs per conversation, so keeping it would stop a new session reusing the server's
+    prompt cache. Anything else the server rejects shows up as its error; add an edit here only then.
+    """
+    req = dict(body)
     if isinstance(req.get("system"), list):
         req["system"] = [b for b in req["system"] if not b.get("text", "").startswith("x-anthropic-billing-header")]
-    req["messages"] = fold_system_messages(body.get("messages", []))
-    if not model.get("preserve_thinking"):
-        req["messages"] = [m for m in ({**m, "content": [b for b in _blocks(m["content"]) if b.get("type") != "thinking"]}
-                                       for m in req["messages"]) if m["content"]]
-    tools = [{"name": t["name"], "description": t.get("description", ""),
-              "input_schema": {k: v for k, v in t["input_schema"].items() if k != "$schema"}}
-             for t in req.pop("tools", []) if "input_schema" in t]  # server-side tools have no schema
-    if tools:
-        req["tools"] = tools
-    else:
-        req.pop("tool_choice", None)
     if "max_tokens" in model:
         req["max_tokens"] = min(req.get("max_tokens", model["max_tokens"]), model["max_tokens"])
     extra = {}

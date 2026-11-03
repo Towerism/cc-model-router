@@ -65,7 +65,7 @@ def test_unsigned_thinking_is_removed_before_anthropic(router, upstream):
         {"role": "user", "content": "again"}]
 
 
-def test_open_weight_request_carries_backend_token_and_settings_only(router, upstream):
+def test_open_weight_request_carries_backend_token_and_model_settings(router, upstream):
     body = {"model": MODEL, "max_tokens": 32000, "temperature": 1, "messages": [{"role": "user", "content": "hi"}],
             "thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}, "metadata": {"user_id": "u"}}
     resp = router.post("/v1/messages?beta=true", json=body, headers=CLAUDE_HEADERS)
@@ -80,9 +80,63 @@ def test_open_weight_request_carries_backend_token_and_settings_only(router, ups
     assert {k: out[k] for k in ("temperature", "top_p", "top_k", "min_p", "repetition_penalty")} == {
         "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0}
     assert out["chat_template_kwargs"] == {"preserve_thinking": True}
-    assert not {"reasoning_effort", "thinking", "metadata", "user"} & set(out)
+    assert out["reasoning_effort"]  # Claude Code's thinking settings reach LiteLLM
     assert resp.status_code == 200
     assert resp.json()["content"] == [{"type": "text", "text": "ok"}]
+
+
+def backend_request(router, upstream, body):
+    router.post("/v1/messages?beta=true", json={"model": MODEL, "max_tokens": 32000, **body}, headers=CLAUDE_HEADERS)
+    return json.loads(upstream.last("/v1/chat/completions")["raw"])
+
+
+def test_open_weight_request_drops_only_the_billing_header_block(router, upstream):
+    out = backend_request(router, upstream, {"messages": [{"role": "user", "content": "hi"}], "system": [
+        {"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.310; cch=37a;"},
+        {"type": "text", "text": "You are Claude Code."},
+        {"type": "text", "text": "Project instructions."}]})
+
+    system = json.dumps([m for m in out["messages"] if m["role"] == "system"])
+    assert "You are Claude Code." in system and "Project instructions." in system
+    assert "x-anthropic-billing-header" not in json.dumps(out)
+
+
+def test_open_weight_request_keeps_what_claude_code_sent(router, upstream):
+    tool = {"name": "Read", "description": "Read a file", "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+        "properties": {"file_path": {"type": "string"}}}}
+    out = backend_request(router, upstream, {"tools": [tool], "messages": [
+        {"role": "user", "content": "hi"},
+        {"role": "system", "content": "MID-CONVERSATION NOTE"},
+        {"role": "user", "content": "more"}]})
+
+    assert len(out["messages"]) == 3  # LiteLLM's own conversion: one turn each, nothing merged
+    assert "MID-CONVERSATION NOTE" in json.dumps(out["messages"])
+    assert out["tools"][0]["function"]["parameters"]["$schema"] == tool["input_schema"]["$schema"]
+
+
+def test_open_weight_thinking_history_reaches_the_backend(make_router, upstream):
+    out = backend_request(make_router(), upstream, {"messages": [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [{"type": "thinking", "thinking": "EARLIER REASONING", "signature": ""},
+                                          {"type": "text", "text": "hello"}]},
+        {"role": "user", "content": "more"}]})
+
+    assert "EARLIER REASONING" in json.dumps(out["messages"])
+
+
+def test_open_weight_request_without_model_settings_is_left_alone(make_router, upstream):
+    out = backend_request(make_router(), upstream, {"temperature": 1, "messages": [{"role": "user", "content": "hi"}]})
+
+    assert out["max_tokens"] == 32000
+    assert out["temperature"] == 1
+    assert not {"top_p", "top_k", "min_p", "chat_template_kwargs"} & set(out)
+
+
+def test_open_weight_max_tokens_below_the_cap_is_kept(router, upstream):
+    out = backend_request(router, upstream, {"max_tokens": 100, "messages": [{"role": "user", "content": "hi"}]})
+
+    assert out["max_tokens"] == 100
 
 
 def test_open_weight_route_ignores_proxy_variables(router, upstream, monkeypatch):
