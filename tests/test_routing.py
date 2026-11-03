@@ -80,6 +80,7 @@ def test_open_weight_request_carries_backend_token_and_model_settings(router, up
     assert {k: out[k] for k in ("temperature", "top_p", "top_k", "min_p", "repetition_penalty")} == {
         "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "repetition_penalty": 1.0}
     assert out["chat_template_kwargs"] == {"preserve_thinking": True}
+    assert out["reasoning_effort"]  # Claude Code's thinking settings reach LiteLLM
     assert resp.status_code == 200
     assert resp.json()["content"] == [{"type": "text", "text": "ok"}]
 
@@ -109,6 +110,7 @@ def test_open_weight_request_keeps_what_claude_code_sent(router, upstream):
         {"role": "system", "content": "MID-CONVERSATION NOTE"},
         {"role": "user", "content": "more"}]})
 
+    assert len(out["messages"]) == 3  # LiteLLM's own conversion: one turn each, nothing merged
     assert "MID-CONVERSATION NOTE" in json.dumps(out["messages"])
     assert out["tools"][0]["function"]["parameters"]["$schema"] == tool["input_schema"]["$schema"]
 

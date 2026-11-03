@@ -98,8 +98,9 @@ base_url = "{upstream.url}"
 token_file = "{token}"
 {settings}
 """)
-        clients.append(TestClient(create_app(load_config(config), anthropic_url=upstream.url)))
-        return clients[-1].__enter__()
+        client = TestClient(create_app(load_config(config), anthropic_url=upstream.url)).__enter__()
+        clients.append(client)
+        return client
 
     yield make
     for client in clients:
