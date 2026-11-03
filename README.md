@@ -10,7 +10,7 @@ Claude Code ── ANTHROPIC_BASE_URL=http://127.0.0.1:9940 ──► cc-model-r
 
 - **Claude models** keep your Claude login (subscription OAuth or API key). Requests go to `api.anthropic.com` byte for byte; the one edit is removing thinking blocks with no signature, which the open-weight model produced earlier in the session and which Anthropic would reject.
 - **Open-weight models** get the server's own bearer token instead of your Claude credential. LiteLLM translates to and from OpenAI Chat Completions, including streaming, tool calls and `reasoning_content`. Before that, the router turns Claude Code's mid-conversation system messages into user turns, drops the billing-header system block, strips `$schema` from tool schemas, drops server-side tools (web search), caps `max_tokens` and applies your sampling settings.
-- **Outbound connections** are refused except to loopback, `api.anthropic.com` (and Anthropic's published IP ranges) and the configured servers. LiteLLM's catalog downloads are switched off.
+- **The router's dependencies don't phone home.** LiteLLM's catalog downloads, release check and use of proxy variables are switched off, and the router refuses any outbound connection except to loopback, `api.anthropic.com` (and Anthropic's published IP ranges) and the configured servers. Claude Code itself is not restricted: it runs as a normal session.
 
 ## Install
 
@@ -51,15 +51,6 @@ Merge [`contrib/claude-settings.example.json`](contrib/claude-settings.example.j
 - `env.CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the open-weight server's context size. It applies only to model IDs Claude Code doesn't recognize, so Claude models keep their own windows.
 - `modelPicker.options` adds one row per open-weight model, using the bare model ID. Leave `replaceBuiltInOptions` unset to keep the Anthropic rows.
 - Don't set `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` or `apiKeyHelper`: Claude requests should keep using your Claude login.
-
-### Keep data on the two destinations
-
-The router controls only its own connections. If data may go only to Anthropic and the open-weight server, Claude Code needs the rest of the example file too:
-
-- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING` stop version checks, telemetry and error reports, some of which go to third parties.
-- `WebFetch` and `WebSearch` are denied: WebFetch fetches arbitrary sites from your machine, and WebSearch sends your query to a search provider.
-- The Bash sandbox has no allowed network domains. On Linux it needs `bubblewrap` and `socat`.
-- MCP servers, claude.ai connectors, plugins and hooks run outside the sandbox. Turn off any that send data to a third party.
 
 ## Limits
 

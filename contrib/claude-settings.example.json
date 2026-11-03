@@ -1,23 +1,11 @@
 {
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:9940",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "65536",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "DISABLE_TELEMETRY": "1",
-    "DISABLE_ERROR_REPORTING": "1"
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "65536"
   },
   "modelPicker": {
     "options": [
       { "model": "qwen3.8-27b", "label": "Qwen 3.8 27B (local)", "description": "Open-weight model through cc-model-router" }
     ]
-  },
-  "permissions": {
-    "deny": ["WebFetch", "WebSearch"]
-  },
-  "sandbox": {
-    "enabled": true,
-    "failIfUnavailable": true,
-    "allowUnsandboxedCommands": false,
-    "network": { "allowedDomains": [], "strictAllowlist": true }
   }
 }
