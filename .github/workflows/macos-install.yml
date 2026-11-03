@@ -1,0 +1,46 @@
+# Proves contrib/install-service.sh installs and restarts the router as a launchd agent on macOS.
+name: macOS install
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  launchd:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uv tool install .
+      - name: Write a test config
+        run: |
+          mkdir -p ~/.config/cc-model-router
+          echo test-token > ~/.config/cc-model-router/test-token
+          cat > ~/.config/cc-model-router/config.toml <<'EOF'
+          listen = "127.0.0.1:9940"
+
+          [models."test-model"]
+          base_url = "http://127.0.0.1:9931"
+          token_file = "~/.config/cc-model-router/test-token"
+          EOF
+      - name: Install the agent
+        run: contrib/install-service.sh
+      - name: Install again (restart)
+        run: contrib/install-service.sh
+      - name: Check the agent and the router
+        run: |
+          label=com.github.towerism.cc-model-router
+          plutil -lint ~/Library/LaunchAgents/$label.plist
+          launchctl print gui/$(id -u)/$label
+          # Any HTTP status means the router is listening; 000 means nothing answered.
+          for _ in $(seq 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9940/v1/models || true)
+            [ "$code" != 000 ] && break
+            sleep 1
+          done
+          echo "router answered HTTP $code"
+          [ "$code" != 000 ]
+      - name: Show the router log
+        if: always()
+        run: cat ~/Library/Logs/cc-model-router.log || true
