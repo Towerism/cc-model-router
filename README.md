@@ -9,7 +9,7 @@ Claude Code ── ANTHROPIC_BASE_URL=http://127.0.0.1:9940 ──► cc-model-r
 ```
 
 - **Claude models** keep your Claude login (subscription OAuth or API key). Requests go to `api.anthropic.com` byte for byte; the one edit is removing thinking blocks with no signature, which the open-weight model produced earlier in the session and which Anthropic would reject.
-- **Open-weight models** get the server's own bearer token instead of your Claude credential. LiteLLM translates to and from OpenAI Chat Completions, including streaming, tool calls and `reasoning_content`. Before that, the router turns Claude Code's mid-conversation system messages into user turns, drops the billing-header system block, strips `$schema` from tool schemas, drops server-side tools (web search), caps `max_tokens` and applies your sampling settings.
+- **Open-weight models** get the server's own bearer token instead of your Claude credential. LiteLLM translates to and from OpenAI Chat Completions, including streaming, tool calls and `reasoning_content`. Before that, the router removes only the billing-header system block, which differs per conversation and would stop a new session reusing the server's prompt cache. It then applies the model's optional settings (`max_tokens` cap, sampling, `preserve_thinking`). Everything else Claude Code sends goes to LiteLLM as-is.
 - **The router's dependencies don't phone home.** LiteLLM's catalog downloads, release check and use of proxy variables are switched off, and the router refuses any outbound connection except to loopback, `api.anthropic.com` (and Anthropic's published IP ranges) and the configured servers. Claude Code itself is not restricted: it runs as a normal session.
 
 ## Install
@@ -31,8 +31,9 @@ listen = "127.0.0.1:9940"
 [models."qwen3.8-27b"]                 # the model ID exactly as Claude Code will send it
 base_url = "http://127.0.0.1:9931"     # the server's root; the router calls <base_url>/v1/chat/completions
 token_file = "~/.config/qlm/api-key"   # file holding the server's bearer token
-max_tokens = 16384                     # cap on the output tokens Claude Code asks for
-preserve_thinking = true               # send earlier reasoning back (chat_template_kwargs.preserve_thinking)
+max_tokens = 16384                     # optional: cap on the output tokens Claude Code asks for
+preserve_thinking = true               # optional: sent as chat_template_kwargs.preserve_thinking
+# optional: overrides Claude Code's values; keys other than temperature, top_p and top_k go in the extra body
 sampling = { temperature = 0.6, top_p = 0.95, top_k = 20, min_p = 0.0, repetition_penalty = 1.0 }
 ```
 
@@ -55,6 +56,7 @@ Merge [`contrib/claude-settings.example.json`](contrib/claude-settings.example.j
 ## Limits
 
 - **Switching into a smaller context window.** A conversation that grew on a Claude model can be larger than the open-weight server accepts. The server's error reaches Claude Code; run `/compact`, then retry.
+- **Fields the server rejects.** The router doesn't filter Claude Code's request for the open-weight route. If a server rejects a field, its error reaches Claude Code, and the edit for that field is added to the router only then. On llama-server nothing besides the billing header needed removing. Not yet checked: servers such as vLLM, which reject a prompt plus `max_tokens` larger than their context. Set `max_tokens` for those models.
 - **Anthropic-only tools** (web search, web fetch, the advisor) don't exist on the open-weight route.
 - Anthropic doesn't support routing Claude Code to non-Claude models; problems on the open-weight route are this project's to fix.
 
@@ -64,4 +66,4 @@ Merge [`contrib/claude-settings.example.json`](contrib/claude-settings.example.j
 uv run pytest
 ```
 
-`tests/test_ccx_parity.py` checks the open-weight route against the request shim of `ccx`, the prototype this replaces, using recorded Claude Code requests in `tests/fixtures/` with every private text replaced. `tests/fixtures/make_expected.py` regenerates the reference files.
+The tests run the router against a local stand-in for both Anthropic and the open-weight server.
