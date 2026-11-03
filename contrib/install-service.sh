@@ -4,11 +4,11 @@
 set -eu
 
 label=com.github.towerism.cc-model-router
-contrib=$(cd "$(dirname "$0")" && pwd)
+contrib=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 bin="$HOME/.local/bin/cc-model-router"
 
 if [ ! -x "$bin" ]; then
-    echo "install-service.sh: $bin not found; run 'uv tool install .' first" >&2
+    echo "install-service.sh: $bin not found; run 'uv tool install .' first (with UV_TOOL_BIN_DIR unset)" >&2
     exit 1
 fi
 
@@ -19,6 +19,7 @@ Darwin)
     mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
     home=$(printf '%s\n' "$HOME" | sed 's/[&|\\]/\\&/g')
     sed "s|@HOME@|$home|g" "$contrib/cc-model-router.plist" > "$plist"
+    chmod 644 "$plist"   # launchd refuses a group- or world-writable plist
     plutil -lint "$plist" > /dev/null
     # bootout returns before the agent is gone, and bootstrap fails while it is still loaded.
     if launchctl bootout "$domain/$label" 2> /dev/null; then
@@ -32,6 +33,7 @@ Darwin)
             sleep 0.2
         done
     fi
+    launchctl enable "$domain/$label"   # undoes an earlier `launchctl disable`, which blocks bootstrap
     launchctl bootstrap "$domain" "$plist"
     echo "cc-model-router started; log: ~/Library/Logs/cc-model-router.log"
     ;;
