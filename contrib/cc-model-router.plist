@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- launchd doesn't expand ~, so install-service.sh replaces @HOME@ with the absolute home directory. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.github.towerism.cc-model-router</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>@HOME@/.local/bin/cc-model-router</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restart only after a crash, like Restart=on-failure in the systemd unit. -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>@HOME@/Library/Logs/cc-model-router.log</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/Library/Logs/cc-model-router.log</string>
+</dict>
+</plist>
