@@ -2,12 +2,13 @@
 to an OpenAI-compatible server through LiteLLM.
 
 Data may only leave the machine for Anthropic and the configured servers, so LiteLLM's catalog downloads
-are switched off before it is imported, and main() refuses every other outbound connection.
+and its use of proxy variables are switched off before it is imported, and main() refuses every other
+outbound connection.
 """
 import os
 
 for _flag in ("LITELLM_OFFLINE_MODE", "LITELLM_LOCAL_MODEL_COST_MAP", "LITELLM_LOCAL_ANTHROPIC_BETA_HEADERS",
-              "LITELLM_DISABLE_LATEST_RELEASE_CHECK"):
+              "LITELLM_DISABLE_LATEST_RELEASE_CHECK", "DISABLE_AIOHTTP_TRUST_ENV"):
     os.environ.setdefault(_flag, "true")
 
 import argparse
@@ -120,8 +121,8 @@ def open_weight_request(body, model):
         req["system"] = [b for b in req["system"] if not b.get("text", "").startswith("x-anthropic-billing-header")]
     req["messages"] = fold_system_messages(body.get("messages", []))
     if not model.get("preserve_thinking"):
-        req["messages"] = [{**m, "content": [b for b in _blocks(m["content"]) if b.get("type") != "thinking"]}
-                           for m in req["messages"]]
+        req["messages"] = [m for m in ({**m, "content": [b for b in _blocks(m["content"]) if b.get("type") != "thinking"]}
+                                       for m in req["messages"]) if m["content"]]
     tools = [{"name": t["name"], "description": t.get("description", ""),
               "input_schema": {k: v for k, v in t["input_schema"].items() if k != "$schema"}}
              for t in req.pop("tools", []) if "input_schema" in t]  # server-side tools have no schema
@@ -142,13 +143,18 @@ def open_weight_request(body, model):
 
 def create_app(config, anthropic_url=ANTHROPIC):
     models = config["models"]
-    client = httpx.AsyncClient(base_url=anthropic_url, timeout=None, trust_env=False)
+    client = httpx.AsyncClient(timeout=None, trust_env=False)
 
     async def to_anthropic(request, content):
-        url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        url = anthropic_url + request.url.path + (f"?{request.url.query}" if request.url.query else "")
         headers = [(k, v) for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP]
-        resp = await client.send(client.build_request(request.method, url, headers=headers, content=content),
-                                 stream=True)
+        try:  # a bare Request, so the client's cookie jar and default headers stay out of it
+            resp = await client.send(httpx.Request(request.method, url, headers=headers, content=content), stream=True)
+        except (httpx.HTTPError, OSError) as e:
+            log.warning("cannot reach Anthropic: %s", e)
+            return JSONResponse({"type": "error", "error": {"type": "api_error",
+                                                            "message": f"cc-model-router cannot reach Anthropic: {e}"}},
+                                status_code=502)
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code,
                                  headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP},
                                  background=BackgroundTask(resp.aclose))
@@ -167,9 +173,10 @@ def create_app(config, anthropic_url=ANTHROPIC):
 
     def parse(raw):
         try:
-            return json.loads(raw)
+            body = json.loads(raw)
         except ValueError:
-            return {}  # let Anthropic report the bad body
+            body = None
+        return body if isinstance(body, dict) else {}  # let Anthropic report a bad body
 
     async def messages(request):
         raw = await request.body()
@@ -211,4 +218,5 @@ def main():
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     allow_only([urlsplit(ANTHROPIC).hostname] + [urlsplit(m["base_url"]).hostname for m in config["models"].values()])
     host, port = config["listen"].rsplit(":", 1)
-    uvicorn.run(create_app(config), host=host, port=int(port), log_level="warning")
+    # asyncio, not uvloop: uvloop's connections bypass the audit hook allow_only() relies on.
+    uvicorn.run(create_app(config), host=host, port=int(port), log_level="warning", loop="asyncio")

@@ -56,6 +56,7 @@ class Upstream:
                 self.send_response(status)
                 self.send_header("content-type", ctype)
                 self.send_header("x-upstream", "yes")
+                self.send_header("set-cookie", "__cf_bm=abc; Path=/")
                 self.send_header("content-length", str(len(data)))
                 self.end_headers()
                 if self.command != "HEAD":

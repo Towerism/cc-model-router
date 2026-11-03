@@ -1,5 +1,8 @@
 import json
 
+from starlette.testclient import TestClient
+
+from cc_model_router import create_app
 from conftest import MODEL
 
 CLAUDE_HEADERS = {"authorization": "Bearer sk-ant-oat01-subscription", "anthropic-beta": "oauth-2025-04-20,x",
@@ -21,6 +24,24 @@ def test_claude_request_reaches_anthropic_unchanged(router, upstream):
     assert resp.status_code == 200
     assert resp.json() == {"from": "anthropic"}
     assert resp.headers["x-upstream"] == "yes"
+
+
+def test_anthropic_cookies_are_not_replayed_on_later_requests(router, upstream):
+    raw = b'{"model": "claude-opus-5-5", "max_tokens": 5, "messages": []}'
+    router.post("/v1/messages", content=raw, headers=CLAUDE_HEADERS)
+    router.cookies.clear()  # the test client keeps cookies itself; only the router's own jar is under test
+    router.post("/v1/messages", content=raw, headers=CLAUDE_HEADERS)
+
+    assert "cookie" not in upstream.last("/v1/messages")["headers"]
+
+
+def test_anthropic_unreachable_is_an_anthropic_error():
+    app = create_app({"models": {}}, anthropic_url="http://127.0.0.1:1")
+    with TestClient(app) as client:
+        resp = client.post("/v1/messages", json={"model": "claude-opus-5-5", "messages": []})
+
+    assert resp.status_code == 502
+    assert resp.json()["error"]["type"] == "api_error"
 
 
 def test_unsigned_thinking_is_removed_before_anthropic(router, upstream):
@@ -62,6 +83,17 @@ def test_open_weight_request_carries_backend_token_and_settings_only(router, ups
     assert not {"reasoning_effort", "thinking", "metadata", "user"} & set(out)
     assert resp.status_code == 200
     assert resp.json()["content"] == [{"type": "text", "text": "ok"}]
+
+
+def test_open_weight_route_ignores_proxy_variables(router, upstream, monkeypatch):
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(var, "http://127.0.0.1:1")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    resp = router.post("/v1/messages", json={"model": MODEL, "max_tokens": 5, "messages": [{"role": "user", "content": "hi"}]})
+
+    assert resp.status_code == 200
+    assert upstream.last("/v1/chat/completions")
 
 
 def test_open_weight_stream_is_anthropic_events(router):
