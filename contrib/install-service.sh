@@ -8,7 +8,7 @@ contrib=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 bin="$HOME/.local/bin/cc-model-router"
 
 if [ ! -x "$bin" ]; then
-    echo "install-service.sh: $bin not found; run 'uv tool install .' first (with UV_TOOL_BIN_DIR unset)" >&2
+    echo "install-service.sh: $bin not found; run 'uv tool install --python 3.14 .' first (with UV_TOOL_BIN_DIR unset)" >&2
     exit 1
 fi
 

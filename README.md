@@ -18,7 +18,7 @@ Runs on macOS and Linux. Requires [uv](https://docs.astral.sh/uv/) and Python 3.
 
 ```bash
 git clone https://github.com/Towerism/cc-model-router && cd cc-model-router
-uv tool install .
+uv tool install --python 3.14 .
 mkdir -p ~/.config/cc-model-router
 ```
 
