@@ -57,7 +57,7 @@ Merge [`contrib/claude-settings.example.json`](contrib/claude-settings.example.j
 
 - **Switching into a smaller context window.** A conversation that grew on a Claude model can be larger than the open-weight server accepts. The server's error reaches Claude Code; run `/compact`, then retry.
 - **Fields the server rejects.** The router doesn't filter Claude Code's request for the open-weight route. If a server rejects a field, its error reaches Claude Code, and the edit for that field is added to the router only then. On llama-server nothing besides the billing header needed removing. Not yet checked: servers such as vLLM, which reject a prompt plus `max_tokens` larger than their context. Set `max_tokens` for those models.
-- **Anthropic-only tools** (web search, web fetch, the advisor) don't exist on the open-weight route.
+- **Anthropic-only tools** (web search, web fetch, the advisor) don't exist on the open-weight route. LiteLLM passes web search on as `web_search_options`, which the server ignores or rejects.
 - Anthropic doesn't support routing Claude Code to non-Claude models; problems on the open-weight route are this project's to fix.
 
 ## Develop
