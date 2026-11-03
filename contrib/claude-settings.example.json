@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:9940",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "65536"
+  },
+  "modelPicker": {
+    "options": [
+      { "model": "qwen3.8-27b", "label": "Qwen 3.8 27B (local)", "description": "Open-weight model through cc-model-router" }
+    ]
+  }
+}

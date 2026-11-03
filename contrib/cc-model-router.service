@@ -1,0 +1,9 @@
+[Unit]
+Description=cc-model-router: Claude Code model router (Anthropic + open-weight)
+
+[Service]
+ExecStart=%h/.local/bin/cc-model-router
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
