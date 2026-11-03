@@ -7,7 +7,7 @@ from starlette.testclient import TestClient
 
 from cc_model_router import create_app, load_config
 
-MODEL = "qwen3.8-27b"  # the model ID in the recorded fixtures
+MODEL = "qwen3.8-27b"
 
 
 def sse(events):
@@ -83,18 +83,31 @@ def upstream():
 
 
 @pytest.fixture
-def router(upstream, tmp_path):
+def make_router(upstream, tmp_path):
+    """A router whose one open-weight model has the given config lines on top of base_url and token_file."""
     token = tmp_path / "api-key"
     token.write_text("backend-token\n")
-    config = tmp_path / "config.toml"
-    config.write_text(f"""
+    clients = []
+
+    def make(settings=""):
+        config = tmp_path / f"config{len(clients)}.toml"
+        config.write_text(f"""
 listen = "127.0.0.1:9940"
 [models."{MODEL}"]
 base_url = "{upstream.url}"
 token_file = "{token}"
-max_tokens = 16384
-preserve_thinking = true
-sampling = {{ temperature = 0.6, top_p = 0.95, top_k = 20, min_p = 0.0, repetition_penalty = 1.0 }}
+{settings}
 """)
-    with TestClient(create_app(load_config(config), anthropic_url=upstream.url)) as client:
-        yield client
+        clients.append(TestClient(create_app(load_config(config), anthropic_url=upstream.url)))
+        return clients[-1].__enter__()
+
+    yield make
+    for client in clients:
+        client.__exit__(None, None, None)
+
+
+@pytest.fixture
+def router(make_router):
+    return make_router("""max_tokens = 16384
+preserve_thinking = true
+sampling = { temperature = 0.6, top_p = 0.95, top_k = 20, min_p = 0.0, repetition_penalty = 1.0 }""")
