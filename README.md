@@ -14,13 +14,12 @@ Claude Code ── ANTHROPIC_BASE_URL=http://127.0.0.1:9940 ──► cc-model-r
 
 ## Install
 
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.14.
+Runs on macOS and Linux. Requires [uv](https://docs.astral.sh/uv/) and Python 3.14.
 
 ```bash
 git clone https://github.com/Towerism/cc-model-router && cd cc-model-router
 uv tool install .
-mkdir -p ~/.config/cc-model-router ~/.config/systemd/user
-cp contrib/cc-model-router.service ~/.config/systemd/user/
+mkdir -p ~/.config/cc-model-router
 ```
 
 Write `~/.config/cc-model-router/config.toml`:
@@ -37,11 +36,17 @@ preserve_thinking = true               # optional: sent as chat_template_kwargs.
 sampling = { temperature = 0.6, top_p = 0.95, top_k = 20, min_p = 0.0, repetition_penalty = 1.0 }
 ```
 
-Add another `[models."<id>"]` table for each further model. Restart the router after editing the file:
+Add another `[models."<id>"]` table for each further model. Then install the router as a user service that starts at login and restarts after a crash: a launchd agent on macOS, a systemd user unit on Linux.
 
 ```bash
-systemctl --user enable --now cc-model-router
-journalctl --user -u cc-model-router -f      # one line per request: model and route, never headers
+contrib/install-service.sh
+```
+
+Run the script again after editing the config file; it restarts the router. The log has one line per request, with the model and route and never headers:
+
+```bash
+tail -f ~/Library/Logs/cc-model-router.log      # macOS
+journalctl --user -u cc-model-router -f         # Linux
 ```
 
 ## Configure Claude Code
