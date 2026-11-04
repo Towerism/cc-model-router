@@ -48,8 +48,16 @@ def load_config(path):
     cfg = tomllib.loads(Path(path).expanduser().read_text())
     models = {model_id: {**m, "token": Path(m["token_file"]).expanduser().read_text().strip()}
               for model_id, m in (cfg.get("models") or {}).items()}
-    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models,
-            "web_search_model": cfg.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)}
+    web_search_model = cfg.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)
+    if web_search_model in models:
+        raise SystemExit(f"cc-model-router: web_search_model = {web_search_model!r} is an open-weight model; "
+                         "it must be a Claude model, because only Anthropic can run WebSearch")
+    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models, "web_search_model": web_search_model}
+
+
+def error(status, message):
+    return JSONResponse({"type": "error", "error": {"type": ERROR_TYPES.get(status, "api_error"), "message": message}},
+                        status_code=status)
 
 
 def allow_only(hosts):
@@ -126,16 +134,36 @@ def create_app(config, anthropic_url=ANTHROPIC):
     web_search_model = config.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)
     client = httpx.AsyncClient(timeout=None, trust_env=False)
 
-    async def to_anthropic(request, content):
+    async def to_anthropic(request, content, web_search=False):
         url = anthropic_url + request.url.path + (f"?{request.url.query}" if request.url.query else "")
         headers = [(k, v) for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP]
+        if web_search:  # the router reads its error body; Anthropic would answer with brotli, which httpx can't decode
+            headers = [(k, v) for k, v in headers if k.lower() != "accept-encoding"]
+            headers.append(("accept-encoding", "gzip, deflate"))
         try:  # a bare Request, so the client's cookie jar and default headers stay out of it
             resp = await client.send(httpx.Request(request.method, url, headers=headers, content=content), stream=True)
         except (httpx.HTTPError, OSError) as e:
             log.warning("cannot reach Anthropic: %s", e)
-            return JSONResponse({"type": "error", "error": {"type": "api_error",
-                                                            "message": f"cc-model-router cannot reach Anthropic: {e}"}},
-                                status_code=502)
+            return error(502, f"cc-model-router cannot reach Anthropic: {e}")
+        if web_search and resp.status_code >= 400:
+            log.warning("web search via web_search_model %r failed: Anthropic returned %s", web_search_model,
+                        resp.status_code)
+            if resp.status_code == 404:
+                # Claude Code answers a 404 by blaming the model it sent, the open-weight one, and shows no message.
+                try:
+                    raw = await resp.aread()
+                except httpx.HTTPError:
+                    raw = b""
+                finally:
+                    await resp.aclose()
+                try:
+                    detail = json.loads(raw)["error"]["message"]
+                except (ValueError, KeyError, TypeError):
+                    text = raw.decode(errors="replace")[:1000]
+                    readable = "�" not in text and all(c.isprintable() or c in "\n\r\t" for c in text)
+                    detail = text if readable else f"no readable error body (status {resp.status_code})"
+                return error(400, f"cc-model-router: Anthropic rejected web_search_model {web_search_model!r}, "
+                                  f"the Claude model that runs WebSearch for open-weight models: {detail}")
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code,
                                  headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP},
                                  background=BackgroundTask(resp.aclose))
@@ -146,8 +174,7 @@ def create_app(config, anthropic_url=ANTHROPIC):
         except Exception as e:  # LiteLLM wraps upstream errors in many exception types
             status = e.status_code if isinstance(getattr(e, "status_code", None), int) else 502
             log.warning("open-weight error %s for %s", status, body.get("model"))
-            return JSONResponse({"type": "error", "error": {"type": ERROR_TYPES.get(status, "api_error"),
-                                                            "message": str(e)[:1000]}}, status_code=status)
+            return error(status, str(e)[:1000])
         if body.get("stream"):
             return StreamingResponse(result, media_type="text/event-stream")
         return JSONResponse(result)
@@ -163,7 +190,8 @@ def create_app(config, anthropic_url=ANTHROPIC):
         raw = await request.body()
         body = parse(raw)
         model = models.get(body.get("model"))
-        if model and is_web_search(body):
+        web_search = bool(model) and is_web_search(body)
+        if web_search:
             # Claude Code sends WebSearch with the main-loop model; only Anthropic can run the search.
             log.info("%s -> anthropic (web search via %s)", body.get("model"), web_search_model)
             body = {**body, "model": web_search_model}
@@ -172,10 +200,13 @@ def create_app(config, anthropic_url=ANTHROPIC):
         else:
             log.info("%s -> %s", body.get("model"), "open-weight" if model else "anthropic")
         if model:
+            tools = body.get("tools", [])
+            if not (isinstance(tools, list) and all(isinstance(t, dict) for t in tools)):
+                return error(400, "tools: must be a list of tool objects")  # LiteLLM would fail on it with a 502
             return await to_open_weight(body, model)
         if (cleaned := without_unsigned_thinking(body)) is not None:
             raw = json.dumps(cleaned).encode()
-        return await to_anthropic(request, raw)
+        return await to_anthropic(request, raw, web_search)
 
     async def count_tokens(request):
         raw = await request.body()
