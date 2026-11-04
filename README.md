@@ -26,7 +26,7 @@ Write `~/.config/cc-model-router/config.toml`:
 
 ```toml
 listen = "127.0.0.1:9940"
-web_search_model = "claude-haiku-5-5"  # optional: the Claude model that runs WebSearch for open-weight models
+web_search_model = "claude-haiku-5-5"  # optional: the Claude model that runs WebSearch for open-weight models; never an open-weight model
 
 [models."qwen3.8-27b"]                 # the model ID exactly as Claude Code will send it
 base_url = "http://127.0.0.1:9931"     # the server's root; the router calls <base_url>/v1/chat/completions

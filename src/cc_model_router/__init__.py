@@ -48,8 +48,11 @@ def load_config(path):
     cfg = tomllib.loads(Path(path).expanduser().read_text())
     models = {model_id: {**m, "token": Path(m["token_file"]).expanduser().read_text().strip()}
               for model_id, m in (cfg.get("models") or {}).items()}
-    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models,
-            "web_search_model": cfg.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)}
+    web_search_model = cfg.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)
+    if web_search_model in models:
+        raise SystemExit(f"cc-model-router: web_search_model = {web_search_model!r} is an open-weight model; "
+                         "it must be a Claude model, because only Anthropic can run WebSearch")
+    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models, "web_search_model": web_search_model}
 
 
 def allow_only(hosts):
