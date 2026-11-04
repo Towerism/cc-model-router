@@ -134,7 +134,7 @@ def create_app(config, anthropic_url=ANTHROPIC):
     web_search_model = config.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)
     client = httpx.AsyncClient(timeout=None, trust_env=False)
 
-    async def to_anthropic(request, content):
+    async def to_anthropic(request, content, web_search=False):
         url = anthropic_url + request.url.path + (f"?{request.url.query}" if request.url.query else "")
         headers = [(k, v) for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP]
         try:  # a bare Request, so the client's cookie jar and default headers stay out of it
@@ -142,6 +142,19 @@ def create_app(config, anthropic_url=ANTHROPIC):
         except (httpx.HTTPError, OSError) as e:
             log.warning("cannot reach Anthropic: %s", e)
             return error(502, f"cc-model-router cannot reach Anthropic: {e}")
+        if web_search and resp.status_code >= 400:
+            log.warning("web search via web_search_model %r failed: Anthropic returned %s", web_search_model,
+                        resp.status_code)
+            if resp.status_code == 404:
+                # Claude Code answers a 404 by blaming the model it sent, the open-weight one, and shows no message.
+                raw = await resp.aread()
+                await resp.aclose()
+                try:
+                    detail = json.loads(raw)["error"]["message"]
+                except (ValueError, KeyError, TypeError):
+                    detail = raw.decode(errors="replace")[:1000]
+                return error(400, f"cc-model-router: Anthropic rejected web_search_model {web_search_model!r}, "
+                                  f"the Claude model that runs WebSearch for open-weight models: {detail}")
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code,
                                  headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP},
                                  background=BackgroundTask(resp.aclose))
@@ -168,7 +181,8 @@ def create_app(config, anthropic_url=ANTHROPIC):
         raw = await request.body()
         body = parse(raw)
         model = models.get(body.get("model"))
-        if model and is_web_search(body):
+        web_search = bool(model) and is_web_search(body)
+        if web_search:
             # Claude Code sends WebSearch with the main-loop model; only Anthropic can run the search.
             log.info("%s -> anthropic (web search via %s)", body.get("model"), web_search_model)
             body = {**body, "model": web_search_model}
@@ -183,7 +197,7 @@ def create_app(config, anthropic_url=ANTHROPIC):
             return await to_open_weight(body, model)
         if (cleaned := without_unsigned_thinking(body)) is not None:
             raw = json.dumps(cleaned).encode()
-        return await to_anthropic(request, raw)
+        return await to_anthropic(request, raw, web_search)
 
     async def count_tokens(request):
         raw = await request.body()

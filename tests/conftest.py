@@ -42,6 +42,9 @@ class Upstream:
                 body = json.loads(raw) if raw else {}
                 if path == "/v1/chat/completions" and "FAIL400" in json.dumps(body.get("messages")):
                     return self.reply(400, json.dumps({"error": {"message": "prompt is too long"}}).encode())
+                if path == "/v1/messages" and body.get("model") == "claude-bogus":
+                    return self.reply(404, json.dumps({"type": "error", "error": {
+                        "type": "not_found_error", "message": "model: claude-bogus"}}).encode())
                 if path == "/v1/chat/completions" and body.get("stream"):
                     return self.reply(200, sse(chat_chunks(body)), "text/event-stream")
                 if path == "/v1/chat/completions":
