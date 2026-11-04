@@ -226,3 +226,11 @@ def test_web_search_model_comes_from_the_config(make_router, upstream):
     router.post("/v1/messages", json=WEB_SEARCH_BODY, headers=CLAUDE_HEADERS)
 
     assert json.loads(upstream.last("/v1/messages")["raw"])["model"] == "claude-sonnet-5-5"
+
+
+def test_open_weight_turn_that_only_lists_web_search_stays_open_weight(router, upstream):
+    body = {k: v for k, v in WEB_SEARCH_BODY.items() if k != "tool_choice"}
+    router.post("/v1/messages", json={**body, "stream": False}, headers=CLAUDE_HEADERS)
+
+    assert upstream.last("/v1/chat/completions")
+    assert not [r for r in upstream.requests if r["path"] == "/v1/messages"]

@@ -90,10 +90,14 @@ def without_unsigned_thinking(body):
 
 
 def is_web_search(body):
-    """True for Claude Code's WebSearch side request, which needs Anthropic's server-side web_search tool."""
-    tools = body.get("tools")
-    return isinstance(tools, list) and any(
-        isinstance(t, dict) and str(t.get("type", "")).startswith("web_search_") for t in tools)
+    """True for Claude Code's WebSearch side request, which needs Anthropic's server-side web_search tool.
+
+    That request forces the tool with tool_choice; a main-loop turn that only lists it stays on its model.
+    """
+    tools, choice = body.get("tools"), body.get("tool_choice")
+    return (isinstance(choice, dict) and choice.get("type") == "tool" and isinstance(tools, list)
+            and any(isinstance(t, dict) and str(t.get("type", "")).startswith("web_search_")
+                    and t.get("name") == choice.get("name") for t in tools))
 
 
 def open_weight_request(body, model):
