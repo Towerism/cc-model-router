@@ -255,6 +255,30 @@ def test_web_search_model_rejected_by_anthropic_is_named_in_the_error(make_route
                for r in caplog.records if r.levelname == "WARNING")
 
 
+def test_web_search_error_body_anthropic_compressed_unreadably_is_left_out(make_router):
+    router = make_router(top='web_search_model = "claude-bogus-br"')
+    resp = router.post("/v1/messages", json=WEB_SEARCH_BODY, headers=CLAUDE_HEADERS)
+
+    assert resp.status_code == 400
+    message = resp.json()["error"]["message"]
+    assert "claude-bogus-br" in message and message.isprintable()
+
+
+def test_web_search_asks_anthropic_only_for_encodings_the_router_can_read(router, upstream):
+    router.post("/v1/messages", json=WEB_SEARCH_BODY, headers={**CLAUDE_HEADERS, "accept-encoding": "gzip, br, zstd"})
+
+    assert upstream.last("/v1/messages")["headers"]["accept-encoding"] == "gzip, deflate"
+
+
+def test_web_search_error_other_than_404_reaches_claude_code_unchanged(make_router, caplog):
+    router = make_router(top='web_search_model = "claude-busy"')
+    resp = router.post("/v1/messages", json=WEB_SEARCH_BODY, headers=CLAUDE_HEADERS)
+
+    assert resp.status_code == 429
+    assert resp.json()["error"] == {"type": "rate_limit_error", "message": "slow down"}
+    assert any("claude-busy" in r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+
+
 def test_claude_404_reaches_claude_code_unchanged(router):
     resp = router.post("/v1/messages", json={"model": "claude-bogus", "max_tokens": 5, "messages": []},
                        headers=CLAUDE_HEADERS)

@@ -45,6 +45,11 @@ class Upstream:
                 if path == "/v1/messages" and body.get("model") == "claude-bogus":
                     return self.reply(404, json.dumps({"type": "error", "error": {
                         "type": "not_found_error", "message": "model: claude-bogus"}}).encode())
+                if path == "/v1/messages" and body.get("model") == "claude-bogus-br":  # brotli bytes httpx can't decode
+                    return self.reply(404, b"\x1b\x8b\x00\xf8\xa5\x40\x02", encoding="br")
+                if path == "/v1/messages" and body.get("model") == "claude-busy":
+                    return self.reply(429, json.dumps({"type": "error", "error": {
+                        "type": "rate_limit_error", "message": "slow down"}}).encode())
                 if path == "/v1/chat/completions" and body.get("stream"):
                     return self.reply(200, sse(chat_chunks(body)), "text/event-stream")
                 if path == "/v1/chat/completions":
@@ -55,9 +60,11 @@ class Upstream:
                         "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6}}).encode())
                 self.reply(200, b'{"from": "anthropic"}')
 
-            def reply(self, status, data, ctype="application/json"):
+            def reply(self, status, data, ctype="application/json", encoding=None):
                 self.send_response(status)
                 self.send_header("content-type", ctype)
+                if encoding:
+                    self.send_header("content-encoding", encoding)
                 self.send_header("x-upstream", "yes")
                 self.send_header("set-cookie", "__cf_bm=abc; Path=/")
                 self.send_header("content-length", str(len(data)))

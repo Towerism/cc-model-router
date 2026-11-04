@@ -137,6 +137,9 @@ def create_app(config, anthropic_url=ANTHROPIC):
     async def to_anthropic(request, content, web_search=False):
         url = anthropic_url + request.url.path + (f"?{request.url.query}" if request.url.query else "")
         headers = [(k, v) for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP]
+        if web_search:  # the router reads its error body; Anthropic would answer with brotli, which httpx can't decode
+            headers = [(k, v) for k, v in headers if k.lower() != "accept-encoding"]
+            headers.append(("accept-encoding", "gzip, deflate"))
         try:  # a bare Request, so the client's cookie jar and default headers stay out of it
             resp = await client.send(httpx.Request(request.method, url, headers=headers, content=content), stream=True)
         except (httpx.HTTPError, OSError) as e:
@@ -147,12 +150,18 @@ def create_app(config, anthropic_url=ANTHROPIC):
                         resp.status_code)
             if resp.status_code == 404:
                 # Claude Code answers a 404 by blaming the model it sent, the open-weight one, and shows no message.
-                raw = await resp.aread()
-                await resp.aclose()
+                try:
+                    raw = await resp.aread()
+                except httpx.HTTPError:
+                    raw = b""
+                finally:
+                    await resp.aclose()
                 try:
                     detail = json.loads(raw)["error"]["message"]
                 except (ValueError, KeyError, TypeError):
-                    detail = raw.decode(errors="replace")[:1000]
+                    text = raw.decode(errors="replace")[:1000]
+                    readable = "�" not in text and all(c.isprintable() or c in "\n\r\t" for c in text)
+                    detail = text if readable else f"no readable error body (status {resp.status_code})"
                 return error(400, f"cc-model-router: Anthropic rejected web_search_model {web_search_model!r}, "
                                   f"the Claude model that runs WebSearch for open-weight models: {detail}")
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code,
