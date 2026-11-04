@@ -201,3 +201,28 @@ def test_other_paths_go_to_anthropic(router, upstream):
     assert router.head("/api/hello").status_code == 200
     assert router.get("/v1/models?limit=1000").json() == {"from": "anthropic"}
     assert [r["path"] for r in upstream.requests] == ["/api/hello", "/v1/models?limit=1000"]
+
+
+WEB_SEARCH_BODY = {"model": MODEL, "max_tokens": 32000, "stream": True,
+                   "system": [{"type": "text", "text": "You run a web search for another Claude model."}],
+                   "messages": [{"role": "user", "content": "Perform a web search for the query: uv 0.13"}],
+                   "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}],
+                   "tool_choice": {"type": "tool", "name": "web_search"}}
+
+
+def test_open_weight_web_search_goes_to_anthropic_with_a_claude_model(router, upstream):
+    resp = router.post("/v1/messages?beta=true", json=WEB_SEARCH_BODY, headers=CLAUDE_HEADERS)
+
+    sent = upstream.last("/v1/messages")
+    assert sent["path"] == "/v1/messages?beta=true"
+    assert {k: sent["headers"][k] for k in CLAUDE_HEADERS} == CLAUDE_HEADERS
+    assert json.loads(sent["raw"]) == {**WEB_SEARCH_BODY, "model": "claude-haiku-5-5"}
+    assert not [r for r in upstream.requests if r["path"] == "/v1/chat/completions"]
+    assert resp.json() == {"from": "anthropic"}
+
+
+def test_web_search_model_comes_from_the_config(make_router, upstream):
+    router = make_router(top='web_search_model = "claude-sonnet-5-5"')
+    router.post("/v1/messages", json=WEB_SEARCH_BODY, headers=CLAUDE_HEADERS)
+
+    assert json.loads(upstream.last("/v1/messages")["raw"])["model"] == "claude-sonnet-5-5"

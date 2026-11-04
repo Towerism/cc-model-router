@@ -84,15 +84,17 @@ def upstream():
 
 @pytest.fixture
 def make_router(upstream, tmp_path):
-    """A router whose one open-weight model has the given config lines on top of base_url and token_file."""
+    """A router whose one open-weight model has the given config lines on top of base_url and token_file, and
+    whose config has the `top` lines above the model table."""
     token = tmp_path / "api-key"
     token.write_text("backend-token\n")
     clients = []
 
-    def make(settings=""):
+    def make(settings="", top=""):
         config = tmp_path / f"config{len(clients)}.toml"
         config.write_text(f"""
 listen = "127.0.0.1:9940"
+{top}
 [models."{MODEL}"]
 base_url = "{upstream.url}"
 token_file = "{token}"
