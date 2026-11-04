@@ -26,6 +26,7 @@ Write `~/.config/cc-model-router/config.toml`:
 
 ```toml
 listen = "127.0.0.1:9940"
+web_search_model = "claude-haiku-5-5"  # optional: the Claude model that runs WebSearch for open-weight models
 
 [models."qwen3.8-27b"]                 # the model ID exactly as Claude Code will send it
 base_url = "http://127.0.0.1:9931"     # the server's root; the router calls <base_url>/v1/chat/completions
@@ -62,7 +63,8 @@ Merge [`contrib/claude-settings.example.json`](contrib/claude-settings.example.j
 
 - **Switching into a smaller context window.** A conversation that grew on a Claude model can be larger than the open-weight server accepts. The server's error reaches Claude Code; run `/compact`, then retry.
 - **Fields the server rejects.** The router doesn't filter Claude Code's request for the open-weight route. If a server rejects a field, its error reaches Claude Code, and the edit for that field is added to the router only then. On llama-server nothing besides the billing header needed removing. Not yet checked: servers such as vLLM, which reject a prompt plus `max_tokens` larger than their context. Set `max_tokens` for those models.
-- **Anthropic-only tools** (web search, web fetch, the advisor) don't exist on the open-weight route. LiteLLM passes web search on as `web_search_options`, which the server ignores or rejects.
+- **Web search runs on Anthropic.** Claude Code's WebSearch sends its own request with the current model and Anthropic's server-side `web_search` tool. For an open-weight model, the router sends that request to Anthropic with `web_search_model` (default `claude-haiku-5-5`) and your Claude login, so the search query goes to Anthropic.
+- **Other Anthropic-only tools** (web fetch, the advisor) don't exist on the open-weight route.
 - Anthropic doesn't support routing Claude Code to non-Claude models; problems on the open-weight route are this project's to fix.
 
 ## Develop

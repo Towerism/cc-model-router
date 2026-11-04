@@ -34,6 +34,7 @@ ANTHROPIC = "https://api.anthropic.com"
 # Anthropic's published inbound ranges (https://platform.claude.com/docs/en/api/ip-addresses).
 ANTHROPIC_NETS = [ipaddress.ip_network(n) for n in ("160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48")]
 DEFAULT_CONFIG = "~/.config/cc-model-router/config.toml"
+DEFAULT_WEB_SEARCH_MODEL = "claude-haiku-5-5"
 HOP_BY_HOP = {"host", "content-length", "connection", "keep-alive", "transfer-encoding"}
 TOP_LEVEL_SAMPLING = ("temperature", "top_p", "top_k")  # the rest go to the server as extra body fields
 ERROR_TYPES = {400: "invalid_request_error", 401: "authentication_error", 403: "permission_error",
@@ -47,7 +48,8 @@ def load_config(path):
     cfg = tomllib.loads(Path(path).expanduser().read_text())
     models = {model_id: {**m, "token": Path(m["token_file"]).expanduser().read_text().strip()}
               for model_id, m in (cfg.get("models") or {}).items()}
-    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models}
+    return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models,
+            "web_search_model": cfg.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)}
 
 
 def allow_only(hosts):
@@ -87,6 +89,17 @@ def without_unsigned_thinking(body):
     return {**body, "messages": messages} if changed else None
 
 
+def is_web_search(body):
+    """True for Claude Code's WebSearch side request, which needs Anthropic's server-side web_search tool.
+
+    That request offers web_search and nothing else (tool_choice is auto); a turn that also has other tools
+    stays on its model.
+    """
+    tools = body.get("tools")
+    return isinstance(tools, list) and bool(tools) and all(
+        isinstance(t, dict) and str(t.get("type", "")).startswith("web_search_") for t in tools)
+
+
 def open_weight_request(body, model):
     """LiteLLM arguments for an open-weight model: Claude Code's body minus the billing-header system block,
     plus the model's settings.
@@ -110,6 +123,7 @@ def open_weight_request(body, model):
 
 def create_app(config, anthropic_url=ANTHROPIC):
     models = config["models"]
+    web_search_model = config.get("web_search_model", DEFAULT_WEB_SEARCH_MODEL)
     client = httpx.AsyncClient(timeout=None, trust_env=False)
 
     async def to_anthropic(request, content):
@@ -149,7 +163,14 @@ def create_app(config, anthropic_url=ANTHROPIC):
         raw = await request.body()
         body = parse(raw)
         model = models.get(body.get("model"))
-        log.info("%s -> %s", body.get("model"), "open-weight" if model else "anthropic")
+        if model and is_web_search(body):
+            # Claude Code sends WebSearch with the main-loop model; only Anthropic can run the search.
+            log.info("%s -> anthropic (web search via %s)", body.get("model"), web_search_model)
+            body = {**body, "model": web_search_model}
+            raw = json.dumps(body).encode()
+            model = None
+        else:
+            log.info("%s -> %s", body.get("model"), "open-weight" if model else "anthropic")
         if model:
             return await to_open_weight(body, model)
         if (cleaned := without_unsigned_thinking(body)) is not None:
