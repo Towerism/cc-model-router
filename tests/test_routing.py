@@ -239,3 +239,14 @@ def test_open_weight_turn_with_web_search_among_other_tools_stays_open_weight(ro
 
     assert upstream.last("/v1/chat/completions")
     assert not [r for r in upstream.requests if r["path"] == "/v1/messages"]
+
+
+def test_open_weight_malformed_tools_is_an_invalid_request(router, upstream):
+    for tools in ([None], "web_search"):
+        resp = router.post("/v1/messages", json={"model": MODEL, "max_tokens": 5, "tools": tools,
+                                                 "messages": [{"role": "user", "content": "hi"}]})
+
+        assert resp.status_code == 400
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "tools" in resp.json()["error"]["message"]
+    assert upstream.requests == []

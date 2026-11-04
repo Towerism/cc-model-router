@@ -55,6 +55,11 @@ def load_config(path):
     return {"listen": cfg.get("listen", "127.0.0.1:9940"), "models": models, "web_search_model": web_search_model}
 
 
+def error(status, message):
+    return JSONResponse({"type": "error", "error": {"type": ERROR_TYPES.get(status, "api_error"), "message": message}},
+                        status_code=status)
+
+
 def allow_only(hosts):
     """Refuse outbound connections except to loopback, Anthropic and `hosts`. Lasts for the process."""
     allowed = set()
@@ -136,9 +141,7 @@ def create_app(config, anthropic_url=ANTHROPIC):
             resp = await client.send(httpx.Request(request.method, url, headers=headers, content=content), stream=True)
         except (httpx.HTTPError, OSError) as e:
             log.warning("cannot reach Anthropic: %s", e)
-            return JSONResponse({"type": "error", "error": {"type": "api_error",
-                                                            "message": f"cc-model-router cannot reach Anthropic: {e}"}},
-                                status_code=502)
+            return error(502, f"cc-model-router cannot reach Anthropic: {e}")
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code,
                                  headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP},
                                  background=BackgroundTask(resp.aclose))
@@ -149,8 +152,7 @@ def create_app(config, anthropic_url=ANTHROPIC):
         except Exception as e:  # LiteLLM wraps upstream errors in many exception types
             status = e.status_code if isinstance(getattr(e, "status_code", None), int) else 502
             log.warning("open-weight error %s for %s", status, body.get("model"))
-            return JSONResponse({"type": "error", "error": {"type": ERROR_TYPES.get(status, "api_error"),
-                                                            "message": str(e)[:1000]}}, status_code=status)
+            return error(status, str(e)[:1000])
         if body.get("stream"):
             return StreamingResponse(result, media_type="text/event-stream")
         return JSONResponse(result)
@@ -175,6 +177,9 @@ def create_app(config, anthropic_url=ANTHROPIC):
         else:
             log.info("%s -> %s", body.get("model"), "open-weight" if model else "anthropic")
         if model:
+            tools = body.get("tools", [])
+            if not (isinstance(tools, list) and all(isinstance(t, dict) for t in tools)):
+                return error(400, "tools: must be a list of tool objects")  # LiteLLM would fail on it with a 502
             return await to_open_weight(body, model)
         if (cleaned := without_unsigned_thinking(body)) is not None:
             raw = json.dumps(cleaned).encode()
